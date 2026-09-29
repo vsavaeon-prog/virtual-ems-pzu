@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Configurarea paginii
+# Configurarea corectă a paginii
 st.set_page_config(
     page_title="Virtual EMS - BESS PZU Optimization",
-    page_layout="wide"
+    layout="wide"
 )
 
 st.title("⚡ Virtual EMS - Optimizare & Arbitraj Baterie (PZU)")
