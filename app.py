@@ -1,77 +1,51 @@
-import streamlit as st
+import pulp
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Virtual EMS - BESS PZU Optimization", layout="wide")
-
-st.title("⚡ Virtual EMS - Optimizare & Arbitraj Baterii (PZU)")
-st.markdown("Încarcă fișierul tău Excel de simulare pentru a rula calculele și graficele.")
-
-# --- SIDEBAR: PARAMETRI BATERIE ȘI ORARE ---
-st.sidebar.header("🎛️ Parametri Sistem & Baterie")
-cap_baterie = st.sidebar.number_input("Capacitate Nominală Baterie (kWh)", value=40120.0, step=1000.0)
-soc_max = st.sidebar.slider("SOC Max (%)", 0.5, 1.0, 0.95, 0.01)
-soc_min = st.sidebar.slider("SOC Min (%)", 0.0, 0.5, 0.15, 0.01)
-randament = st.sidebar.slider("Randament Încărcare/Descărcare (η)", 0.80, 0.99, 0.95, 0.01)
-
-st.sidebar.header("⏰ Ferestre de Orare")
-durata_incarcare = st.sidebar.number_input("Durată Încărcare (ore)", value=4)
-durata_descarcare = st.sidebar.number_input("Durată Descărcare (ore)", value=7)
-
-# --- ÎNCĂRCARE FIȘIER EXCEL ---
-uploaded_file = st.file_uploader("📂 Încarcă fișierul tău Excel (.xlsx)", type=["xlsx", "xls"])
-
-if uploaded_file is not None:
-    @st.cache_data
-    def load_excel_safe(file):
-        xls = pd.ExcelFile(file)
-        # Citeste automat prima foaie din fișier, indiferent de nume
-        df_in = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
-        return df_in
-
-    df = load_excel_safe(uploaded_file)
-    st.success(f"Fișier încărcat cu succes! S-a citit foaia principală.")
-
-    st.subheader("📋 Previzualizare Date Importate")
-    st.dataframe(df.dropna(how='all').head(10))
-
-    if st.button("🚀 Rulează Simulatorul EMS"):
-        with st.spinner("Se procesează datele..."):
+def optimize_bess_arbitrage(prices, capacity_mwh, max_power_mw, eta):
+    # Creare problemă de maximizare a profitului
+    prob = pulp.LpProblem("BESS_Arbitrage_PZU", pulp.LpMaximize)
+    
+    T = range(len(prices))
+    
+    # Variabile de decizie pentru fiecare interval de 15 min / oră
+    p_charge = {t: pulp.LpVariable(f"ch_{t}", lowBound=0, upBound=max_power_mw) for t in T}
+    p_discharge = {t: pulp.LpVariable(f"dis_{t}", lowBound=0, upBound=max_power_mw) for t in T}
+    soc = {t: pulp.LpVariable(f"soc_{t}", lowBound=0.15 * capacity_mwh, upBound=0.95 * capacity_mwh) for t in T}
+    
+    # Variabilă binară pentru a preveni încărcarea și descărcarea simultană
+    u = {t: pulp.LpVariable(f"u_{t}", cat='Binary') for t in T}
+    
+    # Funcția obiectiv: Maximizarea veniturilor din piață (Vânzare - Cumpărare)
+    # Ține cont de prețul PZU și randament (eta)
+    prob += pulp.lpSum(
+        prices[t] * (p_discharge[t] * eta - p_charge[t] / eta) for t in T
+    )
+    
+    # Restricții de dinamică a stării de încărcare (SOC)
+    dt = 0.25 # pentru intervale de 15 minute
+    for t in T:
+        if t == 0:
+            soc_prev = 0.5 * capacity_mwh # SOC inițial
+        else:
+            soc_prev = soc[t-1]
             
-            st.markdown("---")
-            st.subheader("📊 Rezultate Financiare Simulate")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Economie Anuală Estimată", "752.480 LEI", "Optimizat PZU")
-            with col2:
-                st.metric("Capacitate Utilă Baterie", f"{cap_baterie * (soc_max - soc_min):,.0f} kWh", "Utilizabil")
-            with col3:
-                st.metric("Eficiență Ciclare", f"{randament * 100}%", "Sistem activ")
-
-            st.markdown("---")
-            st.subheader("📈 Vizualizare Grafică Date")
-            
-            # Caută automat coloane numerice sau relevante pentru grafic
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            
-            if len(numeric_cols) >= 2:
-                fig, ax = plt.subplots(figsize=(12, 5))
-                # Ia primele două coloane numerice găsite pentru a desena un grafic orientativ
-                c1, c2 = numeric_cols[0], numeric_cols[1]
-                
-                y1 = pd.to_numeric(df[c1].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-                y2 = pd.to_numeric(df[c2].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-                
-                ax.plot(y1.iloc[:96].values, label=str(c1), color="tab:blue")
-                ax.plot(y2.iloc[:96].values, label=str(c2), color="tab:orange", linestyle="--")
-                ax.set_title("Evoluție Parametri (Primele 24 ore / 96 intervale)")
-                ax.set_xlabel("Intervale (15 min)")
-                ax.grid(True)
-                ax.legend()
-                st.pyplot(fig)
-            else:
-                st.info("S-au încărcat datele, dar nu s-au găsit suficient de multe coloane numerice pentru grafic.")
-else:
-    st.info("Te rog să încarci fișierul tău Excel pentru a porni aplicația.")
+        prob += soc[t] == soc_prev + (p_charge[t] * eta * dt) - (p_discharge[t] / dt / eta) * dt # (simplificat pe interval)
+        
+        # Oprit încărcarea/descărcarea simultană folosind u[t]
+        prob += p_charge[t] <= max_power_mw * u[t]
+        prob += p_discharge[t] <= max_power_mw * (1 - u[t])
+        
+    # Rulare solver CBC integrat în PuLP
+    prob.solve(pulp.PULP_CBC_CMD(msg=0))
+    
+    results = []
+    for t in T:
+        results.append({
+            'Interval': t,
+            'Pret_PZU': prices[t],
+            'Incarcare_MW': p_charge[t].varValue,
+            'Descarcare_MW': p_discharge[t].varValue,
+            'SOC_MWh': soc[t].varValue
+        })
+        
+    return pd.DataFrame(results)
