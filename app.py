@@ -51,7 +51,6 @@ if uploaded_file is not None:
             st.markdown("---")
             st.subheader("📈 Vizualizare Curbe Încărcare / Descărcare (EA+ / EA-)")
             
-            # Verificăm existența coloanelor specifice din imagine
             col_ea_plus = [c for c in df.columns if 'EA+' in str(c)]
             col_ea_minus = [c for c in df.columns if 'EA-' in str(c)]
             
@@ -59,9 +58,13 @@ if uploaded_file is not None:
                 cp = col_ea_plus[0]
                 cm = col_ea_minus[0]
                 
+                # Conversie sigură în format numeric (înlocuire virgulă cu punct dacă e cazul)
+                y1 = pd.to_numeric(df[cp].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+                y2 = pd.to_numeric(df[cm].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+                
                 fig, ax = plt.subplots(figsize=(12, 5))
-                ax.plot(df.index[:96], df[cp].iloc[:96], label=cp, color="tab:blue")
-                ax.plot(df.index[:96], df[cm].iloc[:96], label=cm, color="tab:orange", linestyle="--")
+                ax.plot(df.index[:96], y1.iloc[:96], label=cp, color="tab:blue")
+                ax.plot(df.index[:96], y2.iloc[:96], label=cm, color="tab:orange", linestyle="--")
                 ax.set_title("Curbele EA+ și EA- (Primele 24 ore / 96 intervale)")
                 ax.set_xlabel("Intervale (15 min)")
                 ax.set_ylabel("MWh")
