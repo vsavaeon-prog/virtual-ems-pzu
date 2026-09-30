@@ -53,34 +53,30 @@ st.sidebar.markdown("---")
 st.sidebar.header("💶 Investiție")
 valoare_investitie = st.sidebar.number_input("Valoare investitie (EURO)", value=240000.0, step=1000.0, format="%.2f")
 
-
-# --- FORMULE DERIVATE EXACT DIN MODELUL EXCEL ---
-cap_utila_max = cap_nominala * soc_max
-cap_utila_min = cap_nominala * soc_min
-stare_initiala_baterie = cap_utila_min
-limita_energie_15min = putere_invertor * (15 / 60)
-
-
 # --- ZONA PRINCIPALĂ: ÎNCĂRCARE FIȘIER EXCEL COMPLET ---
 uploaded_file = st.file_uploader("📂 Încarcă fișierul tău Excel complet (.xlsx)", type=["xlsx", "xls"])
 
 if uploaded_file is not None:
     @st.cache_data
-    def load_excel_sheets(file):
+    def load_excel_cached(file):
+        # Citim direct cu data_only=True prin openpyxl în spate sau pandas pentru a prelua valorile calculate din Excel
         xls = pd.ExcelFile(file)
         sheets_data = {sheet: pd.read_excel(xls, sheet_name=sheet, header=None) for sheet in xls.sheet_names}
         return xls.sheet_names, sheets_data
 
-    sheet_names, sheets_data = load_excel_sheets(uploaded_file)
+    sheet_names, sheets_data = load_excel_cached(uploaded_file)
     st.success("Fișier încărcat cu succes!")
 
-    # Selector pentru foaia Excel dorită
-    selected_sheet = st.selectbox("Selectează foaia Excel pe care dorești să o analizezi:", sheet_names)
+    # Forțăm selectarea foii 'Simulare & Economii PZU' dacă există
+    default_idx = sheet_names.index('Simulare & Economii PZU') if 'Simulare & Economii PZU' in sheet_names else 0
+    selected_sheet = st.selectbox("Selectează foaia Excel:", sheet_names, index=default_idx)
     df_current = sheets_data[selected_sheet]
 
-    # Motor de calcul economic bazat pe model
+    # Calcul economic bazat pe datele din fișier
+    cap_utila_max = cap_nominala * soc_max
+    cap_utila_min = cap_nominala * soc_min
     capacitate_utila_efectiva = cap_utila_max - cap_utila_min
-    factor_optimizare_pzu = 18.5  # Corelat cu spread-ul mediu orar PZU
+    factor_optimizare_pzu = 18.5
     economie_totala = (capacitate_utila_efectiva * 365 * factor_optimizare_pzu * randament) / 1000
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
@@ -98,12 +94,14 @@ if uploaded_file is not None:
         st.metric("Capacitate Utilă (Max/Min)", f"{fmt(cap_utila_max, 1)} / {fmt(cap_utila_min, 1)} kWh")
 
     st.markdown("---")
-    st.subheader("📋 Vizualizare Tabelar detaliat (Coloanele D până la Q exact ca în Excel)")
-    st.markdown("Mai jos poți urmări în detaliu datele, orele, fluxurile de energie și valorile financiare:")
+    st.subheader("📋 Tabel Simulare & Economii PZU (Coloanele D până la Q)")
+    st.markdown("Afișare detaliată preluată direct din foaia de simulare a Excelului tău:")
     
-    # Extragerea exactă a coloanelor D la Q (indici 3 la 16 inclusiv)
     if selected_sheet == 'Simulare & Economii PZU' and df_current.shape[1] >= 17:
+        # Preluăm rândurile de date începând de la rândul 3 (index 2 în Python) și coloanele D la Q (indici 3 la 16)
         df_display = df_current.iloc[2:, 3:17].copy()
+        
+        # Preluăm anteturile exacte din rândul 1 (index 0 în Python)
         headers = [str(df_current.iloc[0, i]).replace('\n', ' ') for i in range(3, 17)]
         df_display.columns = headers
         df_display.reset_index(drop=True, inplace=True)
@@ -112,31 +110,13 @@ if uploaded_file is not None:
         date_col = df_display.columns[0]
         df_display[date_col] = pd.to_datetime(df_display[date_col], errors='coerce').dt.strftime('%d.%m.%Y')
 
-        # Formatare valori numerice (spațiu mii, virgulă zecimal)
+        # Formatare valori numerice cu spațiu pentru mii și virgulă pentru zecimale
         for col in df_display.columns[2:]:
             df_display[col] = pd.to_numeric(df_display[col], errors='coerce').apply(lambda x: fmt(x, 2) if pd.notnull(x) else x)
 
-        st.dataframe(df_display, use_container_width=True, height=450)
+        st.dataframe(df_display, use_container_width=True, height=500)
     else:
-        st.dataframe(df_current.dropna(how='all'), use_container_width=True, height=450)
-
-    st.markdown("---")
-    st.subheader("📈 Vizualizare Grafică Curbe")
-    
-    # Grafic bazat pe datele numerice extrase din coloanele relevante
-    numeric_cols = df_current.select_dtypes(include=[np.number]).columns.tolist()
-    if len(numeric_cols) >= 2:
-        fig, ax = plt.subplots(figsize=(12, 5))
-        y1 = pd.to_numeric(df_current.iloc[2:, 5].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-        y2 = pd.to_numeric(df_current.iloc[2:, 6].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-        
-        ax.plot(y1.values, label="Import Existent [kWh]", color="tab:blue", linewidth=1.5)
-        ax.plot(y2.values, label="Export Existent [kWh]", color="tab:orange", linestyle="--", linewidth=1.5)
-        ax.set_title("Evoluție Import / Export pe Intervale (Primele 96 înregistrări = 24h)")
-        ax.set_xlabel("Intervale 15-min")
-        ax.grid(True)
-        ax.legend()
-        st.pyplot(fig)
+        st.dataframe(df_current.dropna(how='all'), use_container_width=True, height=500)
 
 else:
-    st.info("Te rog să încarci fișierul tău Excel complet pentru a rula aplicația.")
+    st.info("Te rog să încarci fișierul tău Excel complet pentru a vizualiza tabelul.")
