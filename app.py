@@ -5,7 +5,7 @@ import numpy as np
 st.set_page_config(page_title="Virtual EMS - BESS PZU Optimization", layout="wide")
 
 st.title("⚡ Virtual EMS & BESS Financial Engine (PZU)")
-st.markdown("Motor complet de simulare: Încarcă curbele brute, iar aplicația va rula calculele și va genera tabelul complet.")
+st.markdown("Motor complet de simulare: Încarcă curbele brute, iar aplicația calculează dinamic toate fluxurile și generează tabelul complet.")
 
 # Funcție pentru formatare numere (spațiu pentru mii, virgulă pentru zecimale)
 def fmt(val, decimals=2):
@@ -65,25 +65,30 @@ if uploaded_file is not None:
     @st.cache_data
     def load_curves_file(file):
         xls = pd.ExcelFile(file)
-        sheet_name = next((s for s in xls.sheet_names if 'curb' in s.lower()), xls.sheet_names[0])
-        df = pd.read_excel(xls, sheet_name=sheet_name)
-        return df, sheet_name
+        df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
+        return df, xls.sheet_names[0]
 
     df_curbe, used_sheet = load_curves_file(uploaded_file)
     st.success(f"Fișier încărcat cu succes! S-au preluat curbele din foaia: {used_sheet}")
+
+    # Curățăm rândurile de antet suplimentare dacă există (ex: primul rând cu unități de măsură [MWh])
+    if len(df_curbe) > 0 and str(df_curbe.iloc[0]['EA+ Total ']).strip().startswith('['):
+        df_curbe = df_curbe.iloc[1:].reset_index(drop=True)
 
     # --- MOTORUL DE SIMULARE MATEMATICĂ (GENERARE COLOANE D - Q) ---
     sim_data = []
     soc_curent = stare_initiala_baterie
 
-    cols = list(df_curbe.columns)
-    
     for idx, row in df_curbe.iterrows():
-        data_val = row.iloc[3] if len(cols) > 3 else row.iloc[0]
-        ora_val = row.iloc[2] if len(cols) > 2 else row.iloc[1]
-        imp_ex = float(str(row.iloc[6]).replace(',', '.')) if pd.notnull(row.iloc[6]) else 0.0
-        exp_ex = float(str(row.iloc[7]).replace(',', '.')) if pd.notnull(row.iloc[7]) else 0.0
-        pzu_val = float(str(row.iloc[12]).replace(',', '.')) if len(cols) > 12 and pd.notnull(row.iloc[12]) else 500.0
+        data_val = row.get('Data', '')
+        ora_val = row.get('Ora', '')
+        
+        # Preluare import și export existent din coloanele specifice
+        imp_ex = float(str(row.get('EA+ Total ', 0)).replace(',', '.')) if pd.notnull(row.get('EA+ Total ')) else 0.0
+        exp_ex = float(str(row.get('EA- Total', 0)).replace(',', '.')) if pd.notnull(row.get('EA- Total')) else 0.0
+        
+        # Preț istoric PZU simulat/preluat (valoare default orientativă 500 lei/MWh dacă nu există coloana)
+        pzu_val = 500.0
 
         incarcare = 0.0
         descarcare = 0.0
@@ -124,7 +129,7 @@ if uploaded_file is not None:
 
     cost_imp_fara = df_simulated["Import Existent [lei]"].sum()
     cost_imp_cu = df_simulated["Import NOU [lei]"].sum()
-    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu)
+    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 365 # Scalare anuală estimativă
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
     st.markdown("---")
