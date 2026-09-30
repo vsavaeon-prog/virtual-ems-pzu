@@ -65,7 +65,7 @@ if uploaded_file is not None:
         return df_raw, target_sheet
 
     df_raw, used_sheet = load_excel_data(uploaded_file)
-    st.success(ستr(f"Fișier încărcat cu succes! Foaie utilizată: {used_sheet}"))
+    st.success(f"Fișier încărcat cu succes! Foaie utilizată: {used_sheet}")
 
     # Valori economice preluate din model
     economie_totala = 752480.47 
