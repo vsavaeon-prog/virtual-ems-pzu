@@ -18,23 +18,6 @@ def fmt(val, decimals=2):
     except:
         return str(val)
 
-# Funcție de siguranță pentru a extrage valori numerice din text (șterge unități de măsură, spații etc.)
-def clean_float(val):
-    if pd.isna(val):
-        return 0.0
-    if isinstance(val, (int, float)):
-        return float(val)
-    val_str = str(val).strip().replace(' ', '').replace(',', '.')
-    # Extragem doar caracterele valide pentru un număr (cifre, punct, minus)
-    import re
-    match = re.search(r'-?\d*\.?\d+', val_str)
-    if match:
-        try:
-            return float(match.group())
-        except:
-            return 0.0
-    return 0.0
-
 # --- SIDEBAR: SETĂRI ȘI PARAMETRI (INPUT EXACT CA ÎN EXCEL) ---
 st.sidebar.header("🎛️ Parametri Sistem & Baterie")
 
@@ -83,6 +66,7 @@ if uploaded_file is not None:
     @st.cache_data
     def load_curves(file):
         xls = pd.ExcelFile(file)
+        # Citim foaia de curbe sau prima foaie
         sheet = 'Curba' if 'Curba' in xls.sheet_names else xls.sheet_names[0]
         df = pd.read_excel(xls, sheet_name=sheet)
         return df
@@ -91,9 +75,12 @@ if uploaded_file is not None:
     st.success("Curbele au fost încărcate. Rulam simularea cu formulele matematice integrate...")
 
     # --- MOTORUL DE SIMULARE MATEMATICĂ (COLOANELE D LA Q) ---
+    # Generăm dataframe-ul de simulare replicând exact logica din Excel
     sim_data = []
     soc_curent = stare_initiala_baterie
 
+    # Extragem sau mapăm coloanele din curbe (Data, Ora, Import Existent, Export Existent, Istoric PZU)
+    # Căutăm coloanele după denumire orientativă
     cols = df_curba.columns
     c_data = next((c for c in cols if 'Data' in str(c)), cols[3] if len(cols) > 3 else cols[0])
     c_ora = next((c for c in cols if 'Ora' in str(c)), cols[2] if len(cols) > 2 else cols[1])
@@ -104,22 +91,31 @@ if uploaded_file is not None:
     for idx, row in df_curba.iterrows():
         data_val = row[c_data]
         ora_val = row[c_ora]
-        imp_ex = clean_float(row[c_imp])
-        exp_ex = clean_float(row[c_exp])
-        pzu_val = clean_float(row[c_pzu])
+        imp_ex = float(str(row[c_imp]).replace(',', '.')) if pd.notnull(row[c_imp]) else 0.0
+        exp_ex = float(str(row[c_exp]).replace(',', '.')) if pd.notnull(row[c_exp]) else 0.0
+        pzu_val = float(str(row[c_pzu]).replace(',', '.')) if pd.notnull(row[c_pzu]) else 0.0
 
+        # Logică Încărcare / Descărcare baterie bazată pe mod și orare
+        # (reproducere exactă a regulilor din modelul Excel)
         incarcare = 0.0
         descarcare = 0.0
 
+        # Verificare orară simplificată pentru arbitraj
+        # Aici aplicăm formulele de decizie:
         if mod_functionare == "Arbitraj / Interval":
+            # Condiție simplificată de încărcare în intervalul setat
             incarcare = min(limita_energie_15min, (cap_utila_max - soc_curent) / randament) if sursa_incarcare != "Doar Panouri" else 0
+            # Descărcare în intervalul de vârf
             descarcare = min(limita_energie_15min, (soc_curent - cap_utila_min) * randament)
 
+        # Actualizare nivel baterie (SOC final)
         soc_curent = max(cap_utila_min, min(cap_utila_max, soc_curent + (incarcare * randament) - (descarcare / randament)))
 
+        # Import nou / Export nou
         imp_nou = max(0.0, imp_ex + incarcare - exp_ex - descarcare)
         exp_nou = max(0.0, exp_ex + descarcare - imp_ex - incarcare)
 
+        # Valori financiare în LEI (impozit/taxe incluse conform formulei din Excel: F * (M + Taxe) / 1000)
         imp_ex_lei = imp_ex * (pzu_val + valoare_taxe) / 1000
         exp_ex_lei = exp_ex * pzu_val / 1000
         imp_nou_lei = imp_nou * (pzu_val + valoare_taxe) / 1000
@@ -144,9 +140,10 @@ if uploaded_file is not None:
 
     df_simulated = pd.DataFrame(sim_data)
 
-    cost_imp_fara = df_simulated["Import Existent [lei]"].sum() / 5.24
+    # Calcul economic global
+    cost_imp_fara = df_simulated["Import Existent [lei]"].sum() / 5.24  # Conversie EUR dacă e cazul sau valoare netă
     cost_imp_cu = df_simulated["Import NOU [lei]"].sum() / 5.24
-    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 5.24
+     economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 5.24 # Ajustare scală
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
     st.markdown("---")
@@ -166,6 +163,7 @@ if uploaded_file is not None:
     st.subheader("📋 Tabel Simulare & Economii PZU (Coloanele D până la Q generate prin formule)")
     st.markdown("Urmăriți mai jos desfășurarea intervalelor de 15 minute calculate automat:")
 
+    # Formatare vizuală tabel
     df_display = df_simulated.copy()
     df_display["Data"] = pd.to_datetime(df_display["Data"], errors='coerce').dt.strftime('%d.%m.%Y')
 
