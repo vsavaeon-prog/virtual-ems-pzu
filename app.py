@@ -143,7 +143,7 @@ if uploaded_file is not None:
     # Calcul economic global
     cost_imp_fara = df_simulated["Import Existent [lei]"].sum() / 5.24  # Conversie EUR dacă e cazul sau valoare netă
     cost_imp_cu = df_simulated["Import NOU [lei]"].sum() / 5.24
-     economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 5.24 # Ajustare scală
+    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 5.24 # Ajustare scală
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
     st.markdown("---")
