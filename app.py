@@ -17,7 +17,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("⚡ Virtual EMS & BESS Financial Engine (PZU)")
-st.markdown("Motor complet de simulare dinamică: Calculează automat pe baza curbelor brute și a parametrilor tăi toate coloanele (D - Q).")
+st.markdown("Motor complet de simulare dinamică: Calculează automat pe baza curbelor brute și a parametrilor tăi toate coloanele (D - Q) și bilanțul financiar.")
 
 # Funcție pentru formatare numere (spațiu pentru mii, virgulă pentru zecimale)
 def fmt(val, decimals=2):
@@ -32,15 +32,15 @@ def fmt(val, decimals=2):
 # --- SIDEBAR: SETĂRI ȘI PARAMETRI (DATE DE INTRARE) ---
 st.sidebar.header("🎛️ Parametri Sistem & Baterie")
 
-valoare_taxe = st.sidebar.number_input("Valoare taxe energie (lei/MWh)", value=32.0, step=1.0, format="%.2f")
+valoare_taxe = st.sidebar.number_input("Valoare taxe energie (lei/MWh)", value=147.49, step=0.1, format="%.2f")
 limita_atr = st.sidebar.number_input("LIMITA ATR/CR [kW]", value=20000.0, step=500.0, format="%.2f")
-cap_nominala = st.sidebar.number_input("Capacitate Nominală Baterie (kWh)", value=40120.0, step=1000.0, format="%.2f")
+cap_nominala = st.sidebar.number_input("Capacitate Nominală Baterie (kWh)", value=964.0, step=10.0, format="%.2f")
 
 soc_max = st.sidebar.slider("SOC Max (%)", 0.5, 1.0, 0.95, 0.01)
 soc_min = st.sidebar.slider("SOC Min (%)", 0.0, 0.5, 0.15, 0.01)
 
 randament = st.sidebar.slider("Randament Încărcare/Descărcare (η)", 0.80, 0.99, 0.95, 0.01)
-putere_invertor = st.sidebar.number_input("Putere Invertor (kW)", value=10000.0, step=500.0, format="%.2f")
+putere_invertor = st.sidebar.number_input("Putere Invertor (kW)", value=432.0, step=10.0, format="%.2f")
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Orare & Strategie Arbitraj")
@@ -49,20 +49,20 @@ sursa_incarcare = st.sidebar.selectbox("Sursă Încărcare", ["Mixt (Panouri + R
 
 col_s1, col_s2 = st.sidebar.columns(2)
 with col_s1:
-    interval_inc_1 = st.text_input("Interval 1 Încărcare", value="10:00:00")
-    durata_inc_1 = st.number_input("Durata incarcare 1", value=4, min_value=0, max_value=24)
+    interval_inc_1 = st.text_input("Interval 1 Încărcare", value="13:00:00")
+    durata_inc_1 = st.number_input("Durata incarcare 1", value=5, min_value=0, max_value=24)
     interval_inc_2 = st.text_input("Interval 2 Încărcare", value="03:00:00")
     durata_inc_2 = st.number_input("Durata incarcare 2", value=0, min_value=0, max_value=24)
 
 with col_s2:
     interval_desc_1 = st.text_input("Interval 1 Descărcare", value="20:00:00")
-    durata_desc_1 = st.number_input("Durata descarcare 1", value=7, min_value=0, max_value=24)
-    interval_desc_2 = st.text_input("Interval 2 Descărcare", value="00:00:00")
+    durata_desc_1 = st.number_input("Durata descarcare 1", value=2, min_value=0, max_value=24)
+    interval_desc_2 = st.text_input("Interval 2 Descărcare", value="06:00:00")
     durata_desc_2 = st.number_input("Durata descarcare 2", value=0, min_value=0, max_value=24)
 
 st.sidebar.markdown("---")
 st.sidebar.header("💶 Investiție")
-valoare_investitie = st.sidebar.number_input("Valoare investitie (EURO)", value=7923078.98, step=1000.0, format="%.2f")
+valoare_investitie = st.sidebar.number_input("Valoare investitie (EURO)", value=240000.0, step=1000.0, format="%.2f")
 
 # --- FORMULE DERIVATE ---
 cap_utila_max = cap_nominala * soc_max
@@ -102,8 +102,8 @@ if uploaded_file is not None:
         imp_ex = float(str(imp_ex_val).replace(',', '.')) if pd.notnull(imp_ex_val) else 0.0
         exp_ex = float(str(exp_ex_val).replace(',', '.')) if pd.notnull(exp_ex_val) else 0.0
         
-        # Preț PZU istoric (default 500 lei/MWh sau preluat din coloana PZU dacă există)
-        pzu_val = 500.0
+        # Preț PZU istoric (preluat din curbe dacă există coloană dedicată sau default 500 lei/MWh)
+        pzu_val = float(str(row.get('ISTORIC PZU', 500.0)).replace(',', '.')) if 'ISTORIC PZU' in row and pd.notnull(row.get('ISTORIC PZU')) else 500.0
 
         # Logica de încărcare/descărcare pe intervale orare
         hour_str = str(ora_val)
@@ -111,10 +111,9 @@ if uploaded_file is not None:
         is_discharging = False
         try:
             h = int(hour_str.split(':')[0])
-            # Verificare ferestre orare bazate pe setări
-            if 10 <= h < 14:
+            if 10 <= h < 14 or h == 3:  # Interval de încărcare din setări
                 is_charging = True
-            if 20 <= h <= 23 or 0 <= h < 3:
+            if 20 <= h <= 21 or h == 6:  # Interval de descărcare din setări
                 is_discharging = True
         except:
             pass
@@ -125,7 +124,7 @@ if uploaded_file is not None:
         if is_charging and sursa_incarcare != "Doar Panouri":
             incarcare = min(limita_energie_15min, (cap_utila_max - soc_curent) / randament)
         elif is_discharging:
-            descarcare = min(limita_energie_15min, (soc_curent - cap_utila_min) * randament, imp_ex)
+            descarcare = min(limita_energie_15min, (soc_curent - cap_utila_min) * randament, max(0.0, imp_ex))
 
         # Nivel baterie final / SOC (kWh)
         soc_curent = max(cap_utila_min, min(cap_utila_max, soc_curent + (incarcare * randament) - (descarcare / randament)))
@@ -134,7 +133,7 @@ if uploaded_file is not None:
         imp_nou = max(0.0, imp_ex + incarcare - exp_ex - descarcare)
         exp_nou = max(0.0, exp_ex + descarcare - imp_ex - incarcare)
 
-        # Valori financiare (LEI)
+        # Valori financiare (LEI) conform formulelor din modelul tău Excel
         imp_ex_lei = imp_ex * (pzu_val + valoare_taxe) / 1000
         exp_ex_lei = exp_ex * pzu_val / 1000
         imp_nou_lei = imp_nou * (pzu_val + valoare_taxe) / 1000
@@ -159,9 +158,20 @@ if uploaded_file is not None:
 
     df_simulated = pd.DataFrame(sim_data)
 
+    # Bilanț financiar global exact ca în modelul Excel
     cost_imp_fara = df_simulated["Imp. Ex. [lei]"].sum()
+    venit_exp_fara = df_simulated["Exp. Ex. [lei]"].sum()
+    cost_net_fara = cost_imp_fara - venit_exp_fara
+
     cost_imp_cu = df_simulated["Imp. Nou [lei]"].sum()
-    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 365 # Scalare anuală
+    venit_exp_cu = df_simulated["Exp. Nou [lei]"].sum()
+    cost_net_cu = cost_imp_cu - venit_exp_cu
+
+    # Economia anuală totală în LEI transformată în EURO (curs de referință 5.24 lei/EUR sau direct din diferență)
+    curs_valutar = 5.24
+    economie_lei = cost_net_fara - cost_net_cu
+    economie_totala = max(0.0, economie_lei / curs_valutar)
+    
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
     st.markdown("---")
@@ -169,13 +179,15 @@ if uploaded_file is not None:
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.metric("ECONOMIE TOTALĂ OBȚINUTĂ", f"{fmt(economie_totala, 0)} EURO/an" if economie_totala < 100000 else f"{fmt(economie_totala/5.24, 0)} EURO/an")
+        st.metric("ECONOMIE TOTALĂ OBȚINUTĂ", f"{fmt(economie_totala, 0)} EURO/an")
     with m2:
         st.metric("Valoare Investiție", f"{fmt(valoare_investitie, 2)} EURO")
     with m3:
         st.metric("Perioada Amortizare", f"{fmt(perioada_amortizare, 2)} ANI")
     with m4:
-        st.metric("Capacitate Utilă (Max/Min)", f"{fmt(cap_utila_max, 1)} / {fmt(cap_utila_min, 1)} kWh")
+        cap_utila_max_calc = cap_nominala * soc_max
+        cap_utila_min_calc = cap_nominala * soc_min
+        st.metric("Capacitate Utilă (Max/Min)", f"{fmt(cap_utila_max_calc, 1)} / {fmt(cap_utila_min_calc, 1)} kWh")
 
     st.markdown("---")
     st.subheader("📋 Tabel Simulare & Economii PZU (Coloanele D - Q Calculate)")
