@@ -59,19 +59,20 @@ if uploaded_file is not None:
     @st.cache_data
     def load_excel_data(file):
         xls = pd.ExcelFile(file)
-        # Citim foaia de simulare direct ca matrice brută (fără header prestabilit)
-        df_raw = pd.read_excel(xls, sheet_name='Simulare & Economii PZU', header=None)
-        return df_raw
+        # Identificăm automat foaia care conține simularea
+        target_sheet = next((s for s in xls.sheet_names if 'Simulare' in s or 'Economii' in s), xls.sheet_names[0])
+        df_raw = pd.read_excel(xls, sheet_name=target_sheet, header=None)
+        return df_raw, target_sheet
 
-    df_raw = load_excel_data(uploaded_file)
-    st.success("Fișier încărcat și citit cu succes!")
+    df_raw, used_sheet = load_excel_data(uploaded_file)
+    st.success(ستr(f"Fișier încărcat cu succes! Foaie utilizată: {used_sheet}"))
 
     # Valori economice preluate din model
     economie_totala = 752480.47 
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
     st.markdown("---")
-    st.subheader("💰 Bilanț Financiar & Rezultate Economice (Sincronizate cu Excel)")
+    st.subheader("💰 Bilanț Financiar & Rezultate Economice")
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
