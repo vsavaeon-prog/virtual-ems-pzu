@@ -65,7 +65,6 @@ if uploaded_file is not None:
     @st.cache_data
     def load_curves_file(file):
         xls = pd.ExcelFile(file)
-        # Căutăm foaia 'Curba' sau prima foaie disponibilă
         sheet_name = next((s for s in xls.sheet_names if 'curb' in s.lower()), xls.sheet_names[0])
         df = pd.read_excel(xls, sheet_name=sheet_name)
         return df, sheet_name
@@ -77,37 +76,28 @@ if uploaded_file is not None:
     sim_data = []
     soc_curent = stare_initiala_baterie
 
-    # Identificăm coloanele din fișierul de curbe brut
     cols = list(df_curbe.columns)
     
     for idx, row in df_curbe.iterrows():
-        # Preluare dată, oră, import existent, export existent și preț PZU din curbe brute
         data_val = row.iloc[3] if len(cols) > 3 else row.iloc[0]
         ora_val = row.iloc[2] if len(cols) > 2 else row.iloc[1]
         imp_ex = float(str(row.iloc[6]).replace(',', '.')) if pd.notnull(row.iloc[6]) else 0.0
         exp_ex = float(str(row.iloc[7]).replace(',', '.')) if pd.notnull(row.iloc[7]) else 0.0
         pzu_val = float(str(row.iloc[12]).replace(',', '.')) if len(cols) > 12 and pd.notnull(row.iloc[12]) else 500.0
 
-        # Algoritm de calcul încărcare / descărcare baterie pe interval
         incarcare = 0.0
         descarcare = 0.0
 
-        # Logica orientativă de arbitraj pe intervale
         if mod_functionare in ["Arbitraj / Interval", "Mixt"]:
-            # Încărcare în intervalul orar setat
             if sursa_incarcare != "Doar Panouri":
                 incarcare = min(limita_energie_15min, (cap_utila_max - soc_curent) / randament, max(0.0, exp_ex))
-            # Descărcare în intervalul de vârf
             descarcare = min(limita_energie_15min, (soc_curent - cap_utila_min) * randament, max(0.0, imp_ex))
 
-        # Actualizare nivel baterie (SOC final)
         soc_curent = max(cap_utila_min, min(cap_utila_max, soc_curent + (incarcare * randament) - (descarcare / randament)))
 
-        # Calcul fluxuri noi
         imp_nou = max(0.0, imp_ex + incarcare - exp_ex - descarcare)
         exp_nou = max(0.0, exp_ex + descarcare - imp_ex - incarcare)
 
-        # Valori financiare în LEI
         imp_ex_lei = imp_ex * (pzu_val + valoare_taxe) / 1000
         exp_ex_lei = exp_ex * pzu_val / 1000
         imp_nou_lei = imp_nou * (pzu_val + valoare_taxe) / 1000
@@ -132,8 +122,7 @@ if uploaded_file is not None:
 
     df_simulated = pd.DataFrame(sim_data)
 
-    # Bilanț economic general
-     cost_imp_fara = df_simulated["Import Existent [lei]"].sum()
+    cost_imp_fara = df_simulated["Import Existent [lei]"].sum()
     cost_imp_cu = df_simulated["Import NOU [lei]"].sum()
     economie_totala = max(0.0, cost_imp_fara - cost_imp_cu)
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
@@ -155,7 +144,6 @@ if uploaded_file is not None:
     st.subheader("📋 Tabel Simulare & Economii PZU (Coloanele D până la Q generate din curbe)")
     st.markdown("Rezultatul simulării rulate automat pe baza curbelor brute încărcate:")
 
-    # Formatare afișare tabel
     df_display = df_simulated.copy()
     df_display["Data"] = pd.to_datetime(df_display["Data"], errors='coerce').dt.strftime('%d.%m.%Y')
 
