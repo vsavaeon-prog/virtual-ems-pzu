@@ -4,8 +4,20 @@ import numpy as np
 
 st.set_page_config(page_title="Virtual EMS - BESS PZU Optimization", layout="wide")
 
+# CSS personalizat pentru a compacta și a face tabelul să se muleze perfect pe lățime
+st.markdown("""
+    <style>
+    .stDataFrame {
+        width: 100%;
+    }
+    dataframe {
+        font-size: 13px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("⚡ Virtual EMS & BESS Financial Engine (PZU)")
-st.markdown("Motor complet de simulare: Încarcă curbele brute, iar aplicația calculează dinamic toate fluxurile și generează tabelul complet.")
+st.markdown("Motor complet de simulare: Încarcă curbele brute, calculează dinamic fluxurile și generează tabelul optimizat.")
 
 # Funcție pentru formatare numere (spațiu pentru mii, virgulă pentru zecimale)
 def fmt(val, decimals=2):
@@ -71,11 +83,10 @@ if uploaded_file is not None:
     df_curbe, used_sheet = load_curves_file(uploaded_file)
     st.success(f"Fișier încărcat cu succes! S-au preluat curbele din foaia: {used_sheet}")
 
-    # Curățăm rândurile de antet suplimentare dacă există (ex: primul rând cu unități de măsură [MWh])
     if len(df_curbe) > 0 and str(df_curbe.iloc[0]['EA+ Total ']).strip().startswith('['):
         df_curbe = df_curbe.iloc[1:].reset_index(drop=True)
 
-    # --- MOTORUL DE SIMULARE MATEMATICĂ (GENERARE COLOANE D - Q) ---
+    # --- MOTORUL DE SIMULARE MATEMATICĂ ---
     sim_data = []
     soc_curent = stare_initiala_baterie
 
@@ -83,11 +94,8 @@ if uploaded_file is not None:
         data_val = row.get('Data', '')
         ora_val = row.get('Ora', '')
         
-        # Preluare import și export existent din coloanele specifice
         imp_ex = float(str(row.get('EA+ Total ', 0)).replace(',', '.')) if pd.notnull(row.get('EA+ Total ')) else 0.0
         exp_ex = float(str(row.get('EA- Total', 0)).replace(',', '.')) if pd.notnull(row.get('EA- Total')) else 0.0
-        
-        # Preț istoric PZU simulat/preluat (valoare default orientativă 500 lei/MWh dacă nu există coloana)
         pzu_val = 500.0
 
         incarcare = 0.0
@@ -108,32 +116,33 @@ if uploaded_file is not None:
         imp_nou_lei = imp_nou * (pzu_val + valoare_taxe) / 1000
         exp_nou_lei = exp_nou * pzu_val / 1000
 
+        # Nume de coloane mai scurte și compacte pentru a încăpea perfect pe ecran
         sim_data.append({
             "Data": data_val,
             "Ora": ora_val,
-            "Import Existent [kWh]": imp_ex,
-            "Export Existent [kWh]": exp_ex,
-            "Încărcare Baterie [kWh]": incarcare,
-            "Descărcare Baterie [kWh]": descarcare,
-            "Nivel Baterie Final / SOC [kWh]": soc_curent,
-            "Import NOU [kWh]": imp_nou,
-            "Export NOU [kWh]": exp_nou,
-            "ISTORIC PZU [lei/MWh]": pzu_val,
-            "Import Existent [lei]": imp_ex_lei,
-            "Export Existent [lei]": exp_ex_lei,
-            "Import NOU [lei]": imp_nou_lei,
-            "Export NOU [lei]": exp_nou_lei
+            "Imp. Ex. [kWh]": imp_ex,
+            "Exp. Ex. [kWh]": exp_ex,
+            "Încărcare [kWh]": incarcare,
+            "Descărcare [kWh]": descarcare,
+            "SOC Final [kWh]": soc_curent,
+            "Imp. Nou [kWh]": imp_nou,
+            "Exp. Nou [kWh]": exp_nou,
+            "PZU [lei/MWh]": pzu_val,
+            "Imp. Ex. [lei]": imp_ex_lei,
+            "Exp. Ex. [lei]": exp_ex_lei,
+            "Imp. Nou [lei]": imp_nou_lei,
+            "Exp. Nou [lei]": exp_nou_lei
         })
 
     df_simulated = pd.DataFrame(sim_data)
 
-    cost_imp_fara = df_simulated["Import Existent [lei]"].sum()
-    cost_imp_cu = df_simulated["Import NOU [lei]"].sum()
-    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 365 # Scalare anuală estimativă
+    cost_imp_fara = df_simulated["Imp. Ex. [lei]"].sum()
+    cost_imp_cu = df_simulated["Imp. Nou [lei]"].sum()
+    economie_totala = max(0.0, cost_imp_fara - cost_imp_cu) * 365
     perioada_amortizare = valoare_investitie / economie_totala if economie_totala > 0 else 0
 
     st.markdown("---")
-    st.subheader("💰 Bilanț Financiar & Rezultate Economice (Simulare Calculată)")
+    st.subheader("💰 Bilanț Financiar & Rezultate Economice")
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
@@ -146,8 +155,8 @@ if uploaded_file is not None:
         st.metric("Capacitate Utilă (Max/Min)", f"{fmt(cap_utila_max, 1)} / {fmt(cap_utila_min, 1)} kWh")
 
     st.markdown("---")
-    st.subheader("📋 Tabel Simulare & Economii PZU (Coloanele D până la Q generate din curbe)")
-    st.markdown("Rezultatul simulării rulate automat pe baza curbelor brute încărcate:")
+    st.subheader("📋 Tabel Simulare & Economii PZU (Coloanele Optimizate)")
+    st.markdown("Rezultatul simulării afișat compact:")
 
     df_display = df_simulated.copy()
     df_display["Data"] = pd.to_datetime(df_display["Data"], errors='coerce').dt.strftime('%d.%m.%Y')
@@ -158,4 +167,4 @@ if uploaded_file is not None:
     st.dataframe(df_display, use_container_width=True, height=500)
 
 else:
-    st.info("Te rog să încarci fișierul cu curbe brute pentru a rula simularea și a genera tabelul de rezultate.")
+    st.info("Te rog să încarci fișierul cu curbe brute pentru a rula simularea și a genera tabelul.")
